@@ -1,9 +1,11 @@
 """Unit tests for pyatv.protocols.airplay.auth."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from pyatv import exceptions
+from pyatv.auth import hap_tlv8
 from pyatv.auth.hap_pairing import NO_CREDENTIALS, HapCredentials
 from pyatv.protocols.airplay.auth import (
     AuthenticationType,
@@ -20,6 +22,7 @@ from pyatv.protocols.airplay.auth.legacy import (
     AirPlayLegacyPairSetupProcedure,
     AirPlayLegacyPairVerifyProcedure,
 )
+from pyatv.support.http import HttpResponse
 
 # Legacy credentials only have ltsk (seed) and client_id (identifier) filled in
 LEGACY_CREDENTIALS = HapCredentials(b"", b"1", b"", b"2")
@@ -77,3 +80,107 @@ def test_pair_setup_hap(connection):
 def test_pair_verify_hap(connection):
     procedure = pair_verify(HAP_CREDENTIALS, connection)
     assert isinstance(procedure, AirPlayHapPairVerifyProcedure)
+
+
+@pytest.mark.asyncio
+async def test_pair_setup_hap_uses_pair_setup():
+    connection = MagicMock()
+    connection.post = AsyncMock(
+        side_effect=[
+            HttpResponse("HTTP", "1.1", 200, "OK", {}, b""),
+            HttpResponse(
+                "HTTP",
+                "1.1",
+                200,
+                "OK",
+                {},
+                hap_tlv8.write_tlv(
+                    {
+                        hap_tlv8.TlvValue.SeqNo: b"\x02",
+                        hap_tlv8.TlvValue.Salt: b"salt",
+                        hap_tlv8.TlvValue.PublicKey: b"public_key",
+                    }
+                ),
+            ),
+        ]
+    )
+    srp = MagicMock()
+
+    with patch("pyatv.protocols.airplay.auth.hap.asyncio.sleep", new=AsyncMock()):
+        await AirPlayHapPairSetupProcedure(connection, srp).start_pairing()
+
+    pairing_body = connection.post.call_args_list[1].kwargs["body"]
+    pairing_data = hap_tlv8.read_tlv(pairing_body)
+    assert pairing_data[hap_tlv8.TlvValue.Method] == int.to_bytes(
+        hap_tlv8.Method.PairSetup.value, 1, byteorder="big"
+    )
+    assert pairing_data[hap_tlv8.TlvValue.SeqNo] == b"\x01"
+
+
+@pytest.mark.asyncio
+async def test_pair_setup_hap_starts_pin_window_without_body():
+    connection = MagicMock()
+    connection.post = AsyncMock(
+        side_effect=[
+            HttpResponse("HTTP", "1.1", 200, "OK", {}, b""),
+            HttpResponse(
+                "HTTP",
+                "1.1",
+                200,
+                "OK",
+                {},
+                hap_tlv8.write_tlv(
+                    {
+                        hap_tlv8.TlvValue.SeqNo: b"\x02",
+                        hap_tlv8.TlvValue.Salt: b"salt",
+                        hap_tlv8.TlvValue.PublicKey: b"public_key",
+                    }
+                ),
+            ),
+        ]
+    )
+    srp = MagicMock()
+
+    sleep = AsyncMock()
+    with patch("pyatv.protocols.airplay.auth.hap.asyncio.sleep", new=sleep):
+        await AirPlayHapPairSetupProcedure(connection, srp).start_pairing()
+
+    assert connection.post.call_args_list[0].args == ("/pair-pin-start",)
+    assert connection.post.call_args_list[0].kwargs == {
+        "headers": {
+            "User-Agent": "AirPlay/320.20",
+            "Connection": "keep-alive",
+            "X-Apple-HKP": 3,
+            "Content-Length": "0",
+        }
+    }
+    sleep.assert_awaited_once_with(1.0)
+
+
+@pytest.mark.asyncio
+async def test_pair_setup_hap_raises_on_backoff():
+    connection = MagicMock()
+    connection.post = AsyncMock(
+        side_effect=[
+            HttpResponse("HTTP", "1.1", 200, "OK", {}, b""),
+            HttpResponse(
+                "HTTP",
+                "1.1",
+                200,
+                "OK",
+                {},
+                hap_tlv8.write_tlv(
+                    {
+                        hap_tlv8.TlvValue.SeqNo: b"\x02",
+                        hap_tlv8.TlvValue.Error: bytes([hap_tlv8.ErrorCode.BackOff]),
+                        hap_tlv8.TlvValue.BackOff: b"\xae",
+                    }
+                ),
+            ),
+        ]
+    )
+    srp = MagicMock()
+
+    with patch("pyatv.protocols.airplay.auth.hap.asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(exceptions.BackOffError, match="174 seconds"):
+            await AirPlayHapPairSetupProcedure(connection, srp).start_pairing()

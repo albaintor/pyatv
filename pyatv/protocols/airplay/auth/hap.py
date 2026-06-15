@@ -4,6 +4,7 @@ from copy import copy
 import logging
 from typing import Any, Dict, Optional, Tuple
 
+from pyatv import exceptions
 from pyatv.auth import hap_tlv8
 from pyatv.auth.hap_pairing import (
     HapCredentials,
@@ -11,7 +12,6 @@ from pyatv.auth.hap_pairing import (
     PairVerifyProcedure,
 )
 from pyatv.auth.hap_srp import SRPAuthHandler
-from pyatv.exceptions import InvalidResponseError
 from pyatv.support import log_binary
 from pyatv.support.http import HttpConnection, HttpResponse
 
@@ -27,9 +27,24 @@ _AIRPLAY_HEADERS = {
 
 def _get_pairing_data(resp: HttpResponse):
     if not isinstance(resp.body, bytes):
-        raise InvalidResponseError(f"got unexpected response: {resp.body}")
+        raise exceptions.InvalidResponseError(f"got unexpected response: {resp.body}")
 
-    return hap_tlv8.read_tlv(resp.body)
+    pairing_data = hap_tlv8.read_tlv(resp.body)
+    if hap_tlv8.TlvValue.Error in pairing_data:
+        if pairing_data[hap_tlv8.TlvValue.Error][0] == hap_tlv8.ErrorCode.BackOff.value:
+            backoff = int.from_bytes(
+                pairing_data.get(hap_tlv8.TlvValue.BackOff, b"\x00"),
+                byteorder="little",
+            )
+            raise exceptions.BackOffError(
+                f"device asked to back off for {backoff} seconds"
+            )
+
+        raise exceptions.InvalidResponseError(
+            f"received error from device: {hap_tlv8.stringify(pairing_data)}"
+        )
+
+    return pairing_data
 
 
 class AirPlayHapPairSetupProcedure(PairSetupProcedure):
@@ -51,7 +66,12 @@ class AirPlayHapPairSetupProcedure(PairSetupProcedure):
 
         await self.http.post("/pair-pin-start", headers=_AIRPLAY_HEADERS)
 
-        data = {hap_tlv8.TlvValue.Method: b"\x00", hap_tlv8.TlvValue.SeqNo: b"\x01"}
+        data = {
+            hap_tlv8.TlvValue.Method: int.to_bytes(
+                hap_tlv8.Method.PairSetup.value, 1, byteorder="big"
+            ),
+            hap_tlv8.TlvValue.SeqNo: b"\x01",
+        }
         resp = await self.http.post(
             "/pair-setup", body=hap_tlv8.write_tlv(data), headers=_AIRPLAY_HEADERS
         )

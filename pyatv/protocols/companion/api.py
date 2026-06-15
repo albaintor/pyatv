@@ -197,7 +197,9 @@ class CompanionAPI(
                 "_bf": 0,
                 "_cf": 512,
                 "_clFl": 128,
-                "_i": info.rp_id,
+                # A null "_i" stops the device from pushing TVSystemStatus
+                # (power state) events; fall back to a stable identifier.
+                "_i": info.rp_id or info.device_id.replace(":", "").lower(),
                 "_idsID": creds.client_id,
                 # Not really device id here, but better then anything...
                 "_pubID": info.device_id,
@@ -223,19 +225,18 @@ class CompanionAPI(
         _LOGGER.debug("Started session with SID 0x%X", self.sid)
 
     async def _tv_rc_session_start(self) -> None:
-        _LOGGER.debug("TV RC session start")
-        # TODO additional field '_inUseProc': 'tvremoted' is expected but not handled
-        #  by send_command, ignored
-        #  {'_i': 'TVRCSessionStart', '_x': 2789401675, '_btHP': False,
-        #  '_inUseProc': 'tvremoted', '_c': {'ProtocolVersionKey': '1.2'}, '_t': 2}
-        resp = await self._send_command(
-            "TVRCSessionStart", {"ProtocolVersionKey": "1.2"}
-        )
-        content = resp.get("_c")
-        if content is None:
-            raise exceptions.ProtocolError("missing content")
+        """Open a TV Remote Client session.
 
-        _LOGGER.debug("Started TV RC session with %s", content)
+        tvOS does not answer FetchAttentionState until a TV Remote
+        Client session is registered with the tvremoted process.
+        """
+        try:
+            resp = await self._send_command(
+                "TVRCSessionStart", {"ProtocolVersionKey": "1.2"}
+            )
+            _LOGGER.debug("Started TV RC session: %s", resp.get("_c"))
+        except Exception as ex:  # pylint: disable=broad-except
+            _LOGGER.debug("TVRCSessionStart not supported: %s", ex)
 
     async def _session_stop(self) -> None:
         await self._send_command(

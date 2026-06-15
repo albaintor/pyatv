@@ -71,6 +71,29 @@ async def test_pair_airplay(scriptenv):
     assert exit_code == 0
 
 
+async def test_pair_airplay_with_password(scriptenv):
+    stdout, _, exit_code = await scriptenv(
+        "atvremote",
+        "--address",
+        IP_2,
+        "--protocol",
+        "airplay",
+        "--id",
+        MRP_ID,
+        "--airplay-password",
+        str(DEVICE_PIN),
+        "pair",
+    )
+    assert all_in(
+        stdout,
+        "Using configured password",
+        "seems to have succeeded",
+        str(parse_credentials(DEVICE_CREDENTIALS)),
+    )
+    assert "Enter PIN" not in stdout
+    assert exit_code == 0
+
+
 async def test_airplay_play_url(scriptenv):
     _, _, exit_code = await scriptenv(
         "atvremote",

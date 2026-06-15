@@ -109,3 +109,30 @@ async def test_pairing_with_device_new_credentials(airplay_conf, expected_creden
     with patch("pyatv.protocols.airplay.srp.urandom") as rand_func:
         rand_func.side_effect = predetermined_key
         await perform_pairing(airplay_conf, expected_credentials=expected_credentials)
+
+
+async def test_pairing_with_airplay_password(airplay_conf):
+    service = airplay_conf.get_service(Protocol.AirPlay)
+    service.password = str(DEVICE_PIN)
+
+    with patch("pyatv.protocols.airplay.srp.urandom") as rand_func:
+        rand_func.side_effect = predetermined_key
+
+        storage = MemoryStorage()
+        pairing = await pair(
+            airplay_conf,
+            Protocol.AirPlay,
+            asyncio.get_event_loop(),
+            storage=storage,
+        )
+
+        assert not pairing.device_provides_pin
+        await pairing.begin()
+
+        assert not pairing.has_paired
+        await pairing.finish()
+
+        assert pairing.has_paired
+        assert parse_credentials(service.credentials) == parse_credentials(
+            DEVICE_CREDENTIALS
+        )

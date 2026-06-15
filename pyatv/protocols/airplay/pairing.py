@@ -56,9 +56,11 @@ class AirPlayPairingHandler(PairingHandler):
             self.http,
         )
         self._has_paired = False
-        return await error_handler(
+        await error_handler(
             self.pairing_procedure.start_pairing, exceptions.PairingError
         )
+        if self.service.password:
+            self.pin(self.service.password)
 
     async def finish(self) -> None:
         """Stop pairing process."""
@@ -86,12 +88,15 @@ class AirPlayPairingHandler(PairingHandler):
 
         self._has_paired = True
 
-    def pin(self, pin: int) -> None:
-        """Pin code used for pairing."""
-        self.pin_code = str(pin).zfill(4)
+    def pin(self, pin: int | str) -> None:
+        """Pin code or password used for pairing."""
+        pin_str = str(pin)
+        self.pin_code = (
+            pin_str if pin_str == self.service.password else pin_str.zfill(4)
+        )
         _LOGGER.debug("AirPlay PIN changed to %s", self.pin_code)
 
     @property
     def device_provides_pin(self) -> bool:
         """Return True if remote device presents PIN code, else False."""
-        return True
+        return self.service.password is None

@@ -183,6 +183,14 @@ class GlobalCommands:
             conf.set_credentials(
                 proto, getattr(self.args, f"{proto.name.lower()}_credentials")
             )
+        for proto in [Protocol.RAOP, Protocol.AirPlay]:
+            service = conf.get_service(proto)
+            if service:
+                password = getattr(self.args, f"{proto.name.lower()}_password")
+                if password == "":
+                    service.password = None
+                elif password is not None:
+                    service.password = password
 
         # Protocol specific options
         if self.args.protocol == const.Protocol.DMAP:
@@ -213,6 +221,8 @@ class GlobalCommands:
         if pairing.device_provides_pin:
             pin = await _read_input(self.loop, "Enter PIN on screen: ")
             pairing.pin(pin)
+        elif pairing.service.password:
+            print("Using configured password for pairing")
         else:
             pairing.pin(self.args.pin_code)
 
@@ -345,6 +355,8 @@ Press ENTER to continue
         if pairing.device_provides_pin:
             pin = await _read_input(self.loop, "Enter PIN on screen: ")
             pairing.pin(pin)
+        elif pairing.service.password:
+            print(f"Using configured password for {service.protocol.name}")
         else:
             pairing.pin(1234)
 
@@ -1019,7 +1031,7 @@ async def appstart(loop):
 
 def main():
     """Application start here."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
     return loop.run_until_complete(appstart(loop))
 
 
