@@ -24,6 +24,7 @@ from pyatv.protocols.companion.protocol import (
     CompanionProtocolListener,
     MessageType,
 )
+from pyatv.protocols.companion.voice import FRAME_DURATION, iter_voice_content
 from pyatv.support.url import is_url_or_scheme
 
 _LOGGER = logging.getLogger(__name__)
@@ -244,7 +245,7 @@ class CompanionAPI(
         )
         _LOGGER.debug("Stopped session with SID 0x%X", self.sid)
 
-    async def _send_event(self, identifier: str, content: Mapping[str, Any]) -> None:
+    async def _send_event(self, identifier: str, content: Mapping[Any, Any]) -> None:
         """Subscribe to updates to an event."""
         await self.connect()
         if self._protocol is None:
@@ -307,6 +308,27 @@ class CompanionAPI(
         await self._send_command(
             "_hidC", {"_hBtS": 1 if down else 2, "_hidC": command.value}
         )
+
+    async def siri(self, frames: List[bytes]) -> None:
+        """Send Opus frames using the experimentally observed Siri sequence."""
+        await self.hid_command(True, HidCommand.Siri)
+        started = False
+        try:
+            await self._send_command("_siriStart", {})
+            started = True
+            start_time = self.core.loop.time()
+            frame_count = 0
+            for content in iter_voice_content(frames):
+                await self._send_event("_siA", content)
+                frame_count += len(cast(List[Mapping[int, int]], content[5]))
+                target = start_time + frame_count * FRAME_DURATION
+                await asyncio.sleep(max(0.0, target - self.core.loop.time()))
+        finally:
+            try:
+                if started:
+                    await self._send_command("_siriStop", {})
+            finally:
+                await self.hid_command(False, HidCommand.Siri)
 
     async def hid_event(self, x: int, y: int, mode: TouchAction) -> None:
         """Send a HID command."""

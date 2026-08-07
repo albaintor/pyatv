@@ -48,6 +48,7 @@ from pyatv.protocols.companion.api import (
     SystemStatus,
 )
 from pyatv.protocols.companion.pairing import CompanionPairingHandler
+from pyatv.protocols.companion.voice import encode_audio_file
 from pyatv.support.device_info import lookup_model
 
 _LOGGER = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ SUPPORTED_FEATURES = set(
         FeatureName.Select,
         FeatureName.Menu,
         FeatureName.Home,
+        FeatureName.Siri,
         FeatureName.VolumeUp,
         FeatureName.VolumeDown,
         FeatureName.PlayPause,
@@ -327,6 +329,10 @@ class CompanionRemoteControl(RemoteControl):
     async def home(self, action: InputAction = InputAction.SingleTap) -> None:
         """Press key home."""
         await self._press_button(HidCommand.Home, action)
+
+    async def siri(self, filename: str) -> None:
+        """Send an audio file as experimental Siri voice input."""
+        await self.api.siri(await encode_audio_file(filename))
 
     async def volume_up(self) -> None:
         """Press key volume up."""

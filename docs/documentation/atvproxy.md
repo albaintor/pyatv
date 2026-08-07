@@ -138,6 +138,22 @@ Open up the remote widget in action center, select the device called `Proxy` and
 use pin code `1111` to pair (only needed once). Everything of interest is logged to the
 console by default.
 
+## Experimental Siri Audio Injection
+
+The proxy can replace the iPhone microphone packets in a real Siri session with an
+audio file:
+
+```shell
+$ atvproxy companion `cat creds_comp` <ip> --siri-audio question.wav
+```
+
+Connect the iPhone remote widget to `Proxy`, then hold its Siri button for at least
+the duration of the file. This mode preserves the iPhone's Siri system information
+and session state while substituting only the `_siA` Opus frames. It requires
+`ffmpeg` with libopus support. This is an experimental diagnostic mode; Siri can show
+audio activity without processing the request, and malformed protocol experiments
+can leave Siri temporarily unresponsive.
+
 # MRP Proxy
 
 There is also support for the legacy un-encapsulated MRP protocol, which was

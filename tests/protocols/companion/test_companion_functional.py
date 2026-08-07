@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+from unittest.mock import AsyncMock, patch
 
 from deepdiff import DeepDiff
 import pytest
@@ -20,7 +21,6 @@ from pyatv.interface import App, FeatureName, FeatureState, UserAccount
 from pyatv.protocols.companion.api import SystemStatus
 
 from tests.fake_device.companion import (
-    INITIAL_DURATION,
     INITIAL_RTI_TEXT,
     INITIAL_VOLUME,
     VOLUME_STEP,
@@ -227,6 +227,32 @@ async def test_system_info_includes_identifier(companion_client, companion_state
 async def test_remote_control_buttons(companion_client, companion_state, button):
     await getattr(companion_client.remote_control, button)()
     assert companion_state.latest_button == button
+
+
+async def test_remote_control_siri(companion_client, companion_state):
+    frames = [b"one", b"two", b"three", b"four", b"five", b"six"]
+    with patch(
+        "pyatv.protocols.companion.encode_audio_file",
+        AsyncMock(return_value=frames),
+    ):
+        await companion_client.remote_control.siri("voice.wav")
+
+    assert companion_state.latest_button == "siri"
+    assert companion_state.siri_active is False
+    assert companion_state.siri_audio == [
+        {
+            3: b"onetwothreefourfive",
+            4: 0.0,
+            5: [
+                {1: 3, 2: 0},
+                {1: 3, 2: 3},
+                {1: 5, 2: 6},
+                {1: 4, 2: 11},
+                {1: 4, 2: 15},
+            ],
+        },
+        {3: b"six", 4: 0.1, 5: [{1: 3, 2: 0}]},
+    ]
 
 
 # TODO: This test does not verify that actual input action (e.g. hold).

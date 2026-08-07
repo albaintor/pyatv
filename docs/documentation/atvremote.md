@@ -60,6 +60,20 @@ can just run `atvremote -s 10.0.10.254 <command>` or `atvremote -n FakeATV <comm
 interact with it. Skip down to [Working with commands](#working-with-commands) to see
 what you can do.
 
+## Experimental Companion Siri
+
+An audio file can be sent using the experimentally observed Companion Siri protocol:
+
+```shell
+$ atvremote --id <device id> --protocol companion siri=question.wav
+```
+
+This command requires `ffmpeg` with libopus support. It converts the input to mono
+16 kHz Opus frames and sends them in real time. The Siri UI can react to the audio
+without transcribing it: voice processing appears to depend on Apple account or
+session state that is not yet understood. Incorrect protocol experiments have also
+been observed to leave Siri temporarily unresponsive, so use this command with care.
+
 # Discovering devices
 
 To find devices, use the `scan` command:

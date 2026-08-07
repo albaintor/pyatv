@@ -453,6 +453,9 @@ class FeatureName(Enum):
     Guide = 66
     """Show EPG."""
 
+    Siri = 67
+    """Send experimental Siri voice input."""
+
     ControlCenter = 68
     """Open the Control Center."""
 

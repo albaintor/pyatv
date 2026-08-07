@@ -130,6 +130,11 @@ class FacadeRemoteControl(Relayer, interface.RemoteControl):
         return await self.relay("home")(action=action)
 
     @shield.guard
+    async def siri(self, filename: str) -> None:
+        """Send an audio file as experimental Siri voice input."""
+        return await self.relay("siri")(filename)
+
+    @shield.guard
     async def home_hold(self) -> None:
         """Hold key home."""
         return await self.relay("home_hold")()

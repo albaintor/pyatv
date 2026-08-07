@@ -9,7 +9,7 @@ from io import BytesIO
 from ipaddress import IPv4Address
 import logging
 import sys
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union, cast
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union, cast
 
 from google.protobuf.message import Message as ProtobufMessage
 from zeroconf import Zeroconf
@@ -55,6 +55,7 @@ from pyatv.protocols.companion.protocol import (
     MessageType,
 )
 from pyatv.protocols.companion.server_auth import CompanionServerAuth
+from pyatv.protocols.companion.voice import VoiceFrameInjector, encode_audio_file
 from pyatv.protocols.mrp import protobuf
 from pyatv.protocols.mrp.connection import MrpConnection
 from pyatv.protocols.mrp.protocol import MrpProtocol
@@ -220,7 +221,12 @@ class CompanionAppleTVProxy(
     """Implementation of a fake Companion device."""
 
     def __init__(
-        self, loop: asyncio.AbstractEventLoop, address: str, port: int, credentials: str
+        self,
+        loop: asyncio.AbstractEventLoop,
+        address: str,
+        port: int,
+        credentials: str,
+        siri_frames: Optional[Sequence[bytes]] = None,
     ) -> None:
         """Initialize a new instance of CompanionAppleTVProxy."""
         super().__init__(DEVICE_NAME)
@@ -242,6 +248,9 @@ class CompanionAppleTVProxy(
         self.system_info_xid = None
         self._receive_event: asyncio.Event = asyncio.Event()
         self._receive_task: Optional[asyncio.Future] = None
+        self._siri_injector = (
+            VoiceFrameInjector(siri_frames) if siri_frames is not None else None
+        )
 
     async def start(self) -> None:
         """Start the proxy instance."""
@@ -326,8 +335,8 @@ class CompanionAppleTVProxy(
             return
 
         unpacked = cast(Dict[Any, Any], opack.unpack(data)[0])  # TODO: Bad cast
-        self.process_outgoing_data(frame_type, unpacked)
-        self.protocol.send_opack(frame_type, unpacked)
+        if self.process_outgoing_data(frame_type, unpacked):
+            self.protocol.send_opack(frame_type, unpacked)
 
     def frame_received(self, frame_type: FrameType, data: bytes) -> None:
         """Frame was received from remote device."""
@@ -366,12 +375,17 @@ class CompanionAppleTVProxy(
         self.process_incoming_data(frame_type, cast(Dict[str, Any], data))
         self.send_bytes_to_client(frame_type, opack.pack(data))
 
-    def process_outgoing_data(self, frame_type: FrameType, data: Dict[str, Any]):
+    def process_outgoing_data(
+        self, frame_type: FrameType, data: Dict[str, Any]
+    ) -> bool:
         """Apply any required modifications to outgoing data."""
         if frame_type != FrameType.E_OPACK:
-            return
+            return True
 
         data_type = data.get("_i")
+        if not self._process_siri_data(data_type, data):
+            return False
+
         if data_type == "_systemInfo":
             self.system_info_xid = data.get("_x")
             creds = parse_credentials(self.credentials)
@@ -405,6 +419,27 @@ class CompanionAppleTVProxy(
                                 audio_system_info["mediaRemoteGroupIdentifier"]
                             )
                         )
+        return True
+
+    def _process_siri_data(self, data_type: object, data: Dict[str, Any]) -> bool:
+        if self._siri_injector is None:
+            return True
+        if data_type == "_siriStart":
+            self._siri_injector.reset()
+            _LOGGER.info("Starting Companion Siri audio injection")
+        elif data_type == "_siA":
+            replacement = self._siri_injector.replace(data.get("_c", {}))
+            if replacement is None:
+                _LOGGER.debug("Dropping microphone audio after injected clip")
+                return False
+            data["_c"] = replacement
+        elif data_type == "_siriStop" and not self._siri_injector.finished:
+            _LOGGER.warning(
+                "Siri stopped before all injected audio was sent (%d/%d frames)",
+                self._siri_injector.index,
+                len(self._siri_injector.frames),
+            )
+        return True
 
     def process_incoming_data(self, frame_type: FrameType, data: Dict[str, Any]):
         """Apply any required modifications to incoming data."""
@@ -1523,10 +1558,20 @@ async def _start_mrp_proxy(loop, args, zconf: Zeroconf):
 
 
 async def _start_companion_proxy(loop, args, zconf):
+    siri_frames = (
+        await encode_audio_file(args.siri_audio)
+        if args.siri_audio is not None
+        else None
+    )
+
     def proxy_factory():
         try:
             proxy = CompanionAppleTVProxy(
-                loop, args.remote_ip, args.remote_port, args.credentials
+                loop,
+                args.remote_ip,
+                args.remote_port,
+                args.credentials,
+                siri_frames,
             )
             asyncio.ensure_future(
                 proxy.start(),
@@ -1652,6 +1697,13 @@ async def appstart(loop):
     companion.add_argument("remote_ip", help="Apple TV IP address")
     companion.add_argument("--local_ip", help="local IP address")
     companion.add_argument("--remote_port", help="Companion port")
+    companion.add_argument(
+        "--siri-audio",
+        help=(
+            "experimentally replace iPhone Siri microphone packets with this audio "
+            "file (requires ffmpeg; hold Siri for the duration of the clip)"
+        ),
+    )
 
     airplay = subparsers.add_parser("airplay", help="AirPlay proxy")
     airplay.add_argument("remote_ip", help="Apple TV IP address")

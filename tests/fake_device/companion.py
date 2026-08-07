@@ -42,6 +42,7 @@ HID_BUTTON_MAP = {
     HidCommand.Select: "select",
     HidCommand.Menu: "menu",
     HidCommand.Home: "home",
+    HidCommand.Siri: "siri",
     HidCommand.VolumeDown: "volume_down",
     HidCommand.VolumeUp: "volume_up",
     HidCommand.PlayPause: "play_pause",
@@ -100,6 +101,8 @@ class FakeCompanionState:
         self.system_info: Optional[dict] = None
         self.tv_rc_protocol_version: Optional[str] = None
         self.latest_button: Optional[str] = None
+        self.siri_active: bool = False
+        self.siri_audio: List[Mapping[int, Any]] = []
         self.media_control_flags: int = MediaControlFlags.Volume
         self.interests: Set[str] = set()
         self.volume: float = INITIAL_VOLUME
@@ -409,6 +412,19 @@ class FakeCompanionService(CompanionServerAuth, asyncio.Protocol):
             _LOGGER.warning("Unhandled command: %d %s", button_state, button_code)
             return  # Would be good to send error message here
 
+        self.send_response(message, {})
+
+    def handle__siristart(self, message):
+        self.state.siri_active = True
+        self.state.siri_audio = []
+        self.send_response(message, {})
+
+    def handle__sia(self, message):
+        if self.state.siri_active:
+            self.state.siri_audio.append(message["_c"])
+
+    def handle__siristop(self, message):
+        self.state.siri_active = False
         self.send_response(message, {})
 
     def handle__touchstart(self, message):

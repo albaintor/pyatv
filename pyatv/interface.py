@@ -374,6 +374,18 @@ class RemoteControl:
         """Press key home."""
         raise exceptions.NotSupportedError()
 
+    @feature(67, "Siri", "Send an audio file as experimental Siri voice input.")
+    async def siri(self, filename: str) -> None:
+        """Send an audio file to Siri via Companion.
+
+        EXPERIMENTAL METHOD - MIGHT CHANGE IN THE FUTURE!
+
+        This method requires ``ffmpeg`` with libopus support. The receiving Apple TV
+        might reject otherwise valid audio because Siri voice routing appears to be
+        tied to state or authentication that is not yet understood.
+        """
+        raise exceptions.NotSupportedError()
+
     @feature(
         15, "HomeHold", "Long-press home button (deprecated: use RemoteControl.home)."
     )
